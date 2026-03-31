@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 from torch.nn import Linear
@@ -7,15 +6,15 @@ from sklearn.metrics import f1_score
 import torch.nn.functional as F
 from data_utils import load_data
 import argparse
-parser = argparse.ArgumentParser()
 
 # ── GNN Layer ─────────────────────────────────────────────────────────────────
 # Implements: x_v^k = g_θ( x_v^(k-1) + Σ_{j∈N(v)} x_j^(k-1) )
  
 class GNNLayer(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, dropout=0.5):
         super().__init__()
         self.linear = Linear(dim, dim)
+        self.dropout = dropout
  
     def forward(self, x, edge_index):
         src, dst = edge_index
@@ -24,20 +23,21 @@ class GNNLayer(nn.Module):
         agg = torch.zeros_like(x)
         agg.scatter_add_(0, dst.unsqueeze(1).expand(-1, x.size(1)), x[src])
  
-        # Self + neighbour sum, then apply g_θ
-        return F.relu(self.linear(x + agg))
+        # Self + neighbour sum, then apply g_θ, then dropout
+        return F.dropout(F.relu(self.linear(x + agg)), p=self.dropout, training=self.training)
 
 # ── Full GNN Model ────────────────────────────────────────────────────────────
  
 class GNN(nn.Module):
-    def __init__(self, in_dim, hidden_dim, num_classes, k):
+    def __init__(self, in_dim, hidden_dim, num_classes, k, dropout=0.5):
         super().__init__()
         self.input_proj = Linear(in_dim, hidden_dim)
-        self.layers = nn.ModuleList([GNNLayer(hidden_dim) for _ in range(k)])
+        self.layers = nn.ModuleList([GNNLayer(hidden_dim, dropout) for _ in range(k)])
         self.classifier = Linear(hidden_dim, num_classes)  # w in the loss formula
+        self.dropout = dropout
  
     def forward(self, x, edge_index):
-        h = F.relu(self.input_proj(x))
+        h = F.dropout(F.relu(self.input_proj(x)), p=self.dropout, training=self.training)
         for layer in self.layers:
             h = layer(h, edge_index)
         return self.classifier(h)  # raw logits
@@ -62,7 +62,9 @@ def evaluate(model, data, criterion):
 
  # ── Training ──────────────────────────────────────────────────────────────────
  
-def train(data, k, epochs=2000, hidden_dim=64, lr=0.01, weight_decay=5e-4):
+def train(data, k, epochs=2000, hidden_dim=128, lr=0.01, weight_decay=5e-4, seed=42):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     data   = data.to(device)
  
