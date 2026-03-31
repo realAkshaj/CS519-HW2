@@ -62,7 +62,7 @@ def evaluate(model, data, criterion):
 
  # ── Training ──────────────────────────────────────────────────────────────────
  
-def train(data, k, epochs=3000, hidden_dim=128, lr=0.01, weight_decay=5e-4, seed=42):
+def train(data, k, epochs=3000, hidden_dim=128, lr=0.01, weight_decay=5e-3, seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
