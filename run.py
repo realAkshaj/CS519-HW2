@@ -6,6 +6,9 @@ from sklearn.metrics import f1_score
 import torch.nn.functional as F
 from data_utils import load_data
 import argparse
+import os
+import csv
+from datetime import datetime
 
 # ── GNN Layer ─────────────────────────────────────────────────────────────────
 # Implements: x_v^k = g_θ( x_v^(k-1) + Σ_{j∈N(v)} x_j^(k-1) )
@@ -103,33 +106,102 @@ def train(data, k, epochs=3000, hidden_dim=128, lr=0.01, weight_decay=5e-3, seed
  
     return history, best_metrics   
 
-# ── Plots ─────────────────────────────────────────────────────────────────────
- 
+# ── Plots & Results ──────────────────────────────────────────────────────────
+
+RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
 def plot_f1(history, tag):
     plt.figure()
     plt.plot(history['epoch'], history['train_f1'], label='Train F1')
     plt.plot(history['epoch'], history['val_f1'],   label='Val F1')
     plt.xlabel('Epoch'); plt.ylabel('Macro F1'); plt.legend(); plt.grid(alpha=0.3)
     plt.title(f'F1 vs Epoch [{tag}]')
-    plt.savefig(f'f1_{tag}.png', dpi=150); plt.close()
- 
+    plt.savefig(os.path.join(RESULTS_DIR, f'f1_{tag}.png'), dpi=150); plt.close()
+
 def plot_loss(history, tag):
     plt.figure()
     plt.plot(history['epoch'], history['train_loss'], label='Train Loss')
     plt.plot(history['epoch'], history['val_loss'],   label='Val Loss')
     plt.xlabel('Epoch'); plt.ylabel('Loss'); plt.legend(); plt.grid(alpha=0.3)
     plt.title(f'Loss vs Epoch [{tag}]')
-    plt.savefig(f'loss_{tag}.png', dpi=150); plt.close()
- 
+    plt.savefig(os.path.join(RESULTS_DIR, f'loss_{tag}.png'), dpi=150); plt.close()
+
 def plot_topology(k_values, test_f1s):
     plt.figure()
     plt.plot(k_values, test_f1s, marker='o')
     plt.xlabel('k (GNN layers)'); plt.ylabel('Test Macro F1'); plt.grid(alpha=0.3)
     plt.title('Impact of Topology — Cora')
-    plt.savefig('topology_experiment.png', dpi=150); plt.close()
+    plt.savefig(os.path.join(RESULTS_DIR, 'topology_experiment.png'), dpi=150); plt.close()
+
+def save_results(tag, best, dataset_info, data_info, history, k):
+    """Save a formatted text report and append to a CSV summary."""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Text report
+    report_path = os.path.join(RESULTS_DIR, f'results_{tag}.txt')
+    with open(report_path, 'w') as f:
+        f.write(f"{'='*60}\n")
+        f.write(f"  GNN Results - {tag}\n")
+        f.write(f"  Generated: {timestamp}\n")
+        f.write(f"{'='*60}\n\n")
+        f.write(f"Dataset Info\n")
+        f.write(f"  Dataset       : {dataset_info['name']}\n")
+        f.write(f"  Num graphs    : {dataset_info['num_graphs']}\n")
+        f.write(f"  Num features  : {dataset_info['num_features']}\n")
+        f.write(f"  Num classes   : {dataset_info['num_classes']}\n")
+        f.write(f"  Num nodes     : {data_info['num_nodes']}\n")
+        f.write(f"  Num edges     : {data_info['num_edges']}\n\n")
+        f.write(f"Model Config\n")
+        f.write(f"  GNN layers (k): {k}\n")
+        f.write(f"  Hidden dim    : 128\n")
+        f.write(f"  Epochs        : 3000\n")
+        f.write(f"  LR            : 0.01\n")
+        f.write(f"  Weight decay  : 5e-3\n")
+        f.write(f"  Dropout       : 0.5\n\n")
+        f.write(f"Best Results (by val loss)\n")
+        f.write(f"  Best epoch    : {best['epoch']}\n")
+        f.write(f"  Train F1      : {best['train_f1']:.4f}\n")
+        f.write(f"  Val   F1      : {best['val_f1']:.4f}\n")
+        f.write(f"  Test  F1      : {best['test_f1']:.4f}\n\n")
+        f.write(f"Training History (every 20 epochs)\n")
+        f.write(f"  {'Epoch':>6}  {'Train Loss':>10}  {'Val Loss':>10}  {'Train F1':>8}  {'Val F1':>8}\n")
+        f.write(f"  {'-'*6}  {'-'*10}  {'-'*10}  {'-'*8}  {'-'*8}\n")
+        for i in range(len(history['epoch'])):
+            f.write(f"  {history['epoch'][i]:>6}  {history['train_loss'][i]:>10.4f}  "
+                    f"{history['val_loss'][i]:>10.4f}  {history['train_f1'][i]:>8.4f}  "
+                    f"{history['val_f1'][i]:>8.4f}\n")
+    print(f"  Report saved -> {report_path}")
+
+    # CSV summary (append-friendly)
+    csv_path = os.path.join(RESULTS_DIR, 'results_summary.csv')
+    write_header = not os.path.exists(csv_path)
+    with open(csv_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(['timestamp', 'dataset', 'k', 'best_epoch',
+                             'train_f1', 'val_f1', 'test_f1'])
+        writer.writerow([timestamp, dataset_info['name'], k, best['epoch'],
+                         f"{best['train_f1']:.4f}", f"{best['val_f1']:.4f}",
+                         f"{best['test_f1']:.4f}"])
+    print(f"  CSV  updated -> {csv_path}")
+
+def save_topology_results(k_values, test_f1s):
+    """Save topology experiment results to a dedicated file."""
+    path = os.path.join(RESULTS_DIR, 'topology_experiment.txt')
+    with open(path, 'w') as f:
+        f.write(f"{'='*40}\n")
+        f.write(f"  Topology Experiment - Cora\n")
+        f.write(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*40}\n\n")
+        f.write(f"  {'k':>3}  {'Test F1':>8}\n")
+        f.write(f"  {'-'*3}  {'-'*8}\n")
+        for k, f1 in zip(k_values, test_f1s):
+            f.write(f"  {k:>3}  {f1:>8.4f}\n")
+    print(f"  Topology results saved -> {path}")
  
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────
  
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", type=str)
@@ -149,6 +221,17 @@ print(f'\n{data}')
 print('=' * 107)
 print(f'Number of nodes: {data.num_nodes}')
 print(f'Number of edges: {data.num_edges}')
+
+dataset_info = {
+    'name': args.dataset,
+    'num_graphs': len(dataset),
+    'num_features': dataset.num_features,
+    'num_classes': dataset.num_classes,
+}
+data_info = {
+    'num_nodes': data.num_nodes,
+    'num_edges': data.num_edges,
+}
  
 # Main training run
 tag = f"{args.dataset}_k{args.k}"
@@ -163,6 +246,7 @@ print(f"Test F1    : {best['test_f1']:.4f}")
  
 plot_f1(history, tag)
 plot_loss(history, tag)
+save_results(tag, best, dataset_info, data_info, history, args.k)
  
 # Topology experiment — only runs on Cora
 if args.dataset == 'Cora':
@@ -176,3 +260,4 @@ if args.dataset == 'Cora':
         test_f1s.append(bm['test_f1'])
  
     plot_topology(k_values, test_f1s)
+    save_topology_results(k_values, test_f1s)
